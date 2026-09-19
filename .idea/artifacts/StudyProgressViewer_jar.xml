@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="StudyProgressViewer:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/StudyProgressViewer_jar</output-path>
+    <root id="archive" name="StudyProgressViewer.jar">
+      <element id="module-output" name="StudyProgressViewer" />
+    </root>
+  </artifact>
+</component>
