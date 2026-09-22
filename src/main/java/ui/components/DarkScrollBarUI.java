@@ -10,7 +10,7 @@ public class DarkScrollBarUI extends BasicScrollBarUI {
 
     @Override
     protected void configureScrollBarColors() {
-        this.thumbColor = new Color(64, 72, 82);
+        this.thumbColor = Theme.TEXT_SECONDARY;
         this.trackColor = Theme.BG_DARK;
     }
 

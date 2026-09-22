@@ -1,5 +1,6 @@
 package model;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -7,12 +8,16 @@ public class Course {
     private String name;
     private int total;
     private int done;
+    private LocalDate deadline;
+    private boolean archived;
     private final List<Boolean> cells = new ArrayList<>();
 
     public Course(String name, int total, int done) {
-        setName(name);
-        setTotal(total);
-        setDone(done);
+        this.name = name;
+        this.total = Math.max(0, total);
+        this.done = Math.max(0, Math.min(done, this.total));
+        this.deadline = null;
+        this.archived = false;
         rebuildCells();
     }
 
@@ -22,6 +27,7 @@ public class Course {
     public int getTotal() { return total; }
     public void setTotal(int total) {
         this.total = Math.max(0, total);
+        if (done > this.total) done = this.total;
         rebuildCells();
     }
 
@@ -39,6 +45,21 @@ public class Course {
 
     public List<Boolean> getCells() { return cells; }
 
+    public LocalDate getDeadline() { return deadline; }
+    public void setDeadline(LocalDate deadline) { this.deadline = deadline; }
+
+    public boolean isArchived() { return archived; }
+    public void setArchived(boolean archived) { this.archived = archived; }
+
+    public boolean isDeadlineExpired() {
+        return deadline != null && LocalDate.now().isAfter(deadline);
+    }
+
+    public long getDaysToDeadline() {
+        if (deadline == null) return -1;
+        return java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), deadline);
+    }
+
     public void toggle(int index) {
         if (index < 0 || index >= cells.size()) return;
         boolean now = !cells.get(index);
@@ -51,6 +72,10 @@ public class Course {
     public void resetProgress() {
         done = 0;
         rebuildCells();
+    }
+
+    public boolean isCompleted() {
+        return total > 0 && done >= total;
     }
 
     private void rebuildCells() {

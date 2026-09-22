@@ -7,16 +7,13 @@ import java.awt.*;
 import java.awt.geom.Arc2D;
 import java.awt.geom.Ellipse2D;
 
-/**
- * Круговая диаграмма прогресса — «бублик» с процентом внутри.
- */
 public class PieChart extends JComponent {
 
-    private double percent;      // 0..100
+    private double percent;
     private Color color;
 
     public PieChart(double percent, Color color) {
-        this.percent = percent;
+        this.percent = Math.max(0, Math.min(100, percent));
         this.color = color;
         setPreferredSize(new Dimension(90, 90));
         setOpaque(false);
@@ -41,23 +38,19 @@ public class PieChart extends JComponent {
         int x = (getWidth() - size) / 2;
         int y = (getHeight() - size) / 2;
 
-        // Трек (фон)
-        g2.setColor(new Color(38, 44, 52));
+        g2.setColor(Theme.BG_CARD_HOVER);
         g2.fill(new Ellipse2D.Double(x, y, size, size));
 
-        // Заполненная часть
         double angle = percent / 100.0 * 360.0;
         g2.setColor(color);
         g2.fill(new Arc2D.Double(x, y, size, size, 90, -angle, Arc2D.PIE));
 
-        // Внутренний круг — создаёт «бублик»
         int inner = (int) (size * 0.58);
         int ix = x + (size - inner) / 2;
         int iy = y + (size - inner) / 2;
         g2.setColor(Theme.BG_CARD);
         g2.fill(new Ellipse2D.Double(ix, iy, inner, inner));
 
-        // Текст с процентом
         String text = String.format("%.1f", percent).replace('.', ',') + "%";
         g2.setFont(new Font("Segoe UI", Font.BOLD, 15));
         FontMetrics fm = g2.getFontMetrics();

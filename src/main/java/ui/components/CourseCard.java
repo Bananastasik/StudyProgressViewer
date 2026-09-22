@@ -1,50 +1,84 @@
 package ui.components;
 
 import model.Course;
+import model.CourseRepository;
 import ui.theme.Theme;
+import ui.theme.ThemeManager;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionAdapter;
+import java.awt.geom.Ellipse2D;
 import java.awt.geom.RoundRectangle2D;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
 public class CourseCard extends JPanel {
 
     private static final int CELLS_PER_ROW = 5;
+    private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 
     private final Course course;
-    private final Consumer<Course> onChange;    // вызывается при клике на ячейку
-    private final Consumer<Course> onContext;   // вызывается при правом клике
+    private final CourseRepository courseRepo;
+    private final Consumer<Course> onChange;
+    private final Consumer<Course> onContext;
 
     private JLabel percentLabel;
     private JLabel doneLabel;
     private JLabel leftLabel;
-    private java.util.List<JPanel> cellPanels = new java.util.ArrayList<>();
+    private JLabel deadlineLabel;
+    private final List<JPanel> cellPanels = new ArrayList<>();
+
+    private Point dragStartPoint;
+    private boolean dragging = false;
+    private Runnable onDragStart;
+    private Runnable onDragEnd;
+
+    private final List<Ripple> ripples = new ArrayList<>();
+    private Timer rippleTimer;
 
     public CourseCard(Course course,
+                      CourseRepository courseRepo,
                       Consumer<Course> onChange,
                       Consumer<Course> onContext) {
         this.course = course;
+        this.courseRepo = courseRepo;
         this.onChange = onChange;
         this.onContext = onContext;
 
         setLayout(new BorderLayout());
         setOpaque(false);
         setBorder(new EmptyBorder(16, 14, 16, 14));
-        setPreferredSize(new Dimension(240, 620));
+        setPreferredSize(new Dimension(240, 660));
         setMaximumSize(new Dimension(240, Integer.MAX_VALUE));
         setMinimumSize(new Dimension(240, 400));
 
-        // Правый клик по всей карточке — вызвать меню
         addMouseListener(new MouseAdapter() {
-            @Override public void mousePressed(MouseEvent e) { maybeShow(e); }
-            @Override public void mouseReleased(MouseEvent e) { maybeShow(e); }
-            private void maybeShow(MouseEvent e) {
-                if (e.isPopupTrigger() && onContext != null) {
-                    onContext.accept(course);
+            @Override public void mousePressed(MouseEvent e) {
+                if (e.isPopupTrigger() && onContext != null) onContext.accept(course);
+                else if (SwingUtilities.isLeftMouseButton(e)) dragStartPoint = e.getPoint();
+            }
+            @Override public void mouseReleased(MouseEvent e) {
+                if (e.isPopupTrigger() && onContext != null) onContext.accept(course);
+                if (dragging && onDragEnd != null) onDragEnd.run();
+                dragging = false;
+                dragStartPoint = null;
+            }
+        });
+
+        addMouseMotionListener(new MouseMotionAdapter() {
+            @Override public void mouseDragged(MouseEvent e) {
+                if (dragStartPoint == null) return;
+                int dx = Math.abs(e.getPoint().x - dragStartPoint.x);
+                int dy = Math.abs(e.getPoint().y - dragStartPoint.y);
+                if (!dragging && (dx > 10 || dy > 10)) {
+                    dragging = true;
+                    if (onDragStart != null) onDragStart.run();
                 }
             }
         });
@@ -52,9 +86,22 @@ public class CourseCard extends JPanel {
         add(createHead(), BorderLayout.NORTH);
         add(createGridWrapper(), BorderLayout.CENTER);
         add(createFooter(), BorderLayout.SOUTH);
+
+        rippleTimer = new Timer(16, e -> {
+            boolean any = false;
+            for (Ripple r : ripples) {
+                if (r.progress < 1f) { r.progress += 0.06f; any = true; }
+            }
+            ripples.removeIf(r -> r.progress >= 1f);
+            if (any) repaint();
+            if (ripples.isEmpty()) rippleTimer.stop();
+        });
     }
 
-    // ============ ФОН КАРТОЧКИ ============
+    public void setOnDragStart(Runnable r) { this.onDragStart = r; }
+    public void setOnDragEnd(Runnable r) { this.onDragEnd = r; }
+    public Course getCourse() { return course; }
+
     @Override
     protected void paintComponent(Graphics g) {
         Graphics2D g2 = (Graphics2D) g.create();
@@ -67,7 +114,6 @@ public class CourseCard extends JPanel {
         super.paintComponent(g);
     }
 
-    // ============ ВЕРХ: имя + процент ============
     private JPanel createHead() {
         JPanel head = new JPanel();
         head.setLayout(new BoxLayout(head, BoxLayout.Y_AXIS));
@@ -95,6 +141,23 @@ public class CourseCard extends JPanel {
         percentLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         head.add(percentLabel);
 
+        if (course.getDeadline() != null) {
+            long days = course.getDaysToDeadline();
+            String txt;
+            Color col;
+            if (days < 0) { txt = "дедлайн прошёл"; col = Theme.DANGER; }
+            else if (days == 0) { txt = "сегодня!"; col = Theme.DANGER; }
+            else if (days <= 7) { txt = "осталось " + days + " дн."; col = Theme.DANGER; }
+            else { txt = "до " + course.getDeadline().format(FMT); col = Theme.TEXT_SECONDARY; }
+
+            deadlineLabel = new JLabel(txt);
+            deadlineLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+            deadlineLabel.setForeground(col);
+            deadlineLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            head.add(Box.createVerticalStrut(3));
+            head.add(deadlineLabel);
+        }
+
         return head;
     }
 
@@ -102,8 +165,6 @@ public class CourseCard extends JPanel {
         return String.format("%.1f", p).replace('.', ',') + "%";
     }
 
-
-    // Правильная версия — оборачиваем
     private JPanel createGridWrapper() {
         JPanel grid = createCellsGrid();
 
@@ -124,7 +185,6 @@ public class CourseCard extends JPanel {
         return wrapper;
     }
 
-    // ============ СЕТКА ЯЧЕЕК ============
     private JPanel createCellsGrid() {
         cellPanels.clear();
 
@@ -159,12 +219,8 @@ public class CourseCard extends JPanel {
                 boolean isActive = taskIndex < course.getTotal();
 
                 JPanel cell;
-                if (isActive) {
-                    cell = createClickableCell(taskIndex);
-                } else {
-                    cell = new JPanel();
-                    cell.setOpaque(false);
-                }
+                if (isActive) cell = createClickableCell(taskIndex);
+                else { cell = new JPanel(); cell.setOpaque(false); }
                 cellsRow.add(cell);
                 cellPanels.add(cell);
             }
@@ -177,7 +233,6 @@ public class CourseCard extends JPanel {
         return grid;
     }
 
-    // ============ КЛИКАБЕЛЬНАЯ ЯЧЕЙКА ============
     private JPanel createClickableCell(int taskIndex) {
         JPanel cell = new JPanel() {
             private boolean hover = false;
@@ -187,13 +242,26 @@ public class CourseCard extends JPanel {
                     @Override public void mouseEntered(MouseEvent e) { hover = true; repaint(); }
                     @Override public void mouseExited(MouseEvent e) { hover = false; repaint(); }
                     @Override public void mouseClicked(MouseEvent e) {
-                        course.toggle(taskIndex);
+                        boolean wasCompleted = course.isCompleted();
+                        boolean wasDone = course.getCells().get(taskIndex);
 
-                        // Обновляем свою карточку — цвета и текст
+                        ripples.add(new Ripple(e.getX(), e.getY()));
+
+                        course.toggle(taskIndex);
                         refreshLocal();
 
-                        // Сообщаем наверх — обновить сводку и сохранить
+                        if (courseRepo != null) {
+                            if (!wasDone) courseRepo.getStats().addForToday(1);
+                            else courseRepo.getStats().addForToday(-1);
+                        }
+
+                        if (!wasCompleted && course.isCompleted()) {
+                            celebrateCompletion();
+                        }
+
                         if (onChange != null) onChange.accept(course);
+
+                        if (!rippleTimer.isRunning()) rippleTimer.start();
                     }
                 });
             }
@@ -205,6 +273,8 @@ public class CourseCard extends JPanel {
                 int w = getWidth(), h = getHeight();
 
                 boolean isDone = course.getCells().get(taskIndex);
+                boolean isLight = !ThemeManager.isDark();
+
                 Color color;
                 if (!isDone) {
                     color = Theme.PINK_DIM;
@@ -217,8 +287,28 @@ public class CourseCard extends JPanel {
                 }
                 if (hover) color = brighter(color, 0.45f);
 
-                g2.setColor(color);
-                g2.fill(new RoundRectangle2D.Double(0, 0, w, h, 3, 3));
+                if (!isDone && isLight) {
+                    // Пустая ячейка в светлой теме — белый фон + голубая рамка
+                    g2.setColor(Color.WHITE);
+                    g2.fill(new RoundRectangle2D.Double(0, 0, w, h, 3, 3));
+                    g2.setColor(hover ? Theme.LEVEL_4 : Theme.LEVEL_3);
+                    g2.setStroke(new BasicStroke(1f));
+                    g2.draw(new RoundRectangle2D.Double(0.5, 0.5, w - 1, h - 1, 3, 3));
+                } else {
+                    g2.setColor(color);
+                    g2.fill(new RoundRectangle2D.Double(0, 0, w, h, 3, 3));
+                }
+
+                for (Ripple r : ripples) {
+                    if (r.originX >= 0 && r.originX <= w && r.originY >= 0 && r.originY <= h) {
+                        float alpha = (1f - r.progress) * 0.6f;
+                        int radius = (int) (r.progress * Math.max(w, h) * 1.5);
+                        g2.setColor(new Color(255, 255, 255, (int) (alpha * 255)));
+                        g2.fill(new Ellipse2D.Double(r.originX - radius, r.originY - radius,
+                                radius * 2, radius * 2));
+                    }
+                }
+
                 if (hover) {
                     g2.setColor(Theme.TEXT_PRIMARY);
                     g2.setStroke(new BasicStroke(1.2f));
@@ -233,7 +323,72 @@ public class CourseCard extends JPanel {
         return cell;
     }
 
-    // ============ НИЗ: статистика ============
+    private static class Ripple {
+        final int originX;
+        final int originY;
+        float progress = 0f;
+        Ripple(int x, int y) { this.originX = x; this.originY = y; }
+    }
+
+    private void celebrateCompletion() {
+        Window parent = SwingUtilities.getWindowAncestor(this);
+        if (parent == null) return;
+
+        JWindow confetti = new JWindow(parent);
+        confetti.setBackground(new Color(0, 0, 0, 0));
+
+        Point loc = getLocationOnScreen();
+        int w = getWidth(), h = getHeight();
+        confetti.setSize(w, h);
+        confetti.setLocation(loc.x, loc.y);
+
+        final int count = 60;
+        final int[] xs = new int[count];
+        final int[] ys = new int[count];
+        final int[] vx = new int[count];
+        final int[] vy = new int[count];
+        final Color[] colors = new Color[count];
+
+        java.util.Random rnd = new java.util.Random();
+        for (int i = 0; i < count; i++) {
+            xs[i] = w / 2;
+            ys[i] = h / 2;
+            vx[i] = rnd.nextInt(16) - 8;
+            vy[i] = -rnd.nextInt(10) - 3;
+            colors[i] = Theme.PIE_COLORS[rnd.nextInt(Theme.PIE_COLORS.length)];
+        }
+
+        JComponent canvas = new JComponent() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                for (int i = 0; i < count; i++) {
+                    g2.setColor(colors[i]);
+                    g2.fillRect(xs[i], ys[i], 6, 8);
+                }
+                g2.dispose();
+            }
+        };
+        confetti.setContentPane(canvas);
+        confetti.setAlwaysOnTop(true);
+        confetti.setVisible(true);
+
+        Timer t = new Timer(16, null);
+        final int[] frame = {0};
+        t.addActionListener(e -> {
+            frame[0]++;
+            for (int i = 0; i < count; i++) {
+                xs[i] += vx[i];
+                ys[i] += vy[i];
+                vy[i] += 1;
+            }
+            canvas.repaint();
+            if (frame[0] > 90) { t.stop(); confetti.dispose(); }
+        });
+        t.start();
+    }
+
     private JPanel createFooter() {
         JPanel footer = new JPanel();
         footer.setLayout(new BoxLayout(footer, BoxLayout.Y_AXIS));
@@ -277,10 +432,6 @@ public class CourseCard extends JPanel {
         return row;
     }
 
-    // ============ ОБНОВЛЕНИЕ ============
-    /**
-     * Обновляет тексты и цвета ячеек в этой карточке — без пересоздания.
-     */
     private void refreshLocal() {
         if (percentLabel != null) {
             percentLabel.setText(formatPercent(course.getPercent()) + " сделано");
@@ -291,7 +442,6 @@ public class CourseCard extends JPanel {
         for (JPanel cell : cellPanels) cell.repaint();
     }
 
-    // ============ ВСПОМОГАТЕЛЬНЫЕ ============
     private Color progressColor(double percent) {
         if (percent < 25) return new Color(248, 81, 73);
         if (percent < 50) return new Color(210, 153, 34);

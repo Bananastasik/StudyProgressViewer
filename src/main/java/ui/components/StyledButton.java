@@ -5,15 +5,12 @@ import ui.theme.Theme;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.awt.geom.RoundRectangle2D;
 
 public class StyledButton extends JButton {
 
     public StyledButton(String text, Color background) {
         super(text);
-
         setFont(new Font("Segoe UI", Font.BOLD, 13));
         setForeground(Color.WHITE);
         setFocusPainted(false);
@@ -22,17 +19,7 @@ public class StyledButton extends JButton {
         setOpaque(false);
         setBorder(new EmptyBorder(8, 16, 8, 16));
         setCursor(new Cursor(Cursor.HAND_CURSOR));
-
-        final boolean[] hover = {false};
-        addMouseListener(new MouseAdapter() {
-            @Override public void mouseEntered(MouseEvent e) { hover[0] = true; repaint(); }
-            @Override public void mouseExited(MouseEvent e) { hover[0] = false; repaint(); }
-        });
-
         setBackground(background);
-
-        // Переопределяем paint
-        addNotify();
     }
 
     @Override

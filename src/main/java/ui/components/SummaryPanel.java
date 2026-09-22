@@ -2,28 +2,32 @@ package ui.components;
 
 import model.Course;
 import model.CourseRepository;
+import model.DailyStats;
 import ui.theme.Theme;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.geom.RoundRectangle2D;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
-/**
- * Сводка сверху: общий прогресс + большая сетка + круговые диаграммы.
- */
 public class SummaryPanel extends JPanel {
 
     private static final int SUMMARY_ROWS = 10;
     private static final int SUMMARY_CELLS = 80 * 24;
+    private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 
     private final CourseRepository repo;
 
     private JLabel subLabel;
     private JLabel percentLabel;
     private JPanel gridPanel;
+    private JPanel piesContainer;
     private JPanel piesPanel;
+
+    private JLabel forecastValue;
 
     public SummaryPanel(CourseRepository repo) {
         this.repo = repo;
@@ -33,13 +37,19 @@ public class SummaryPanel extends JPanel {
         setBorder(new EmptyBorder(16, 20, 16, 20));
 
         add(createTitleBox(), BorderLayout.WEST);
+
         gridPanel = createSummaryGrid();
         add(gridPanel, BorderLayout.CENTER);
+
+        add(createRightColumn(), BorderLayout.EAST);
+
+        piesContainer = new JPanel(new BorderLayout());
+        piesContainer.setOpaque(false);
         piesPanel = createPiesPanel();
-        add(piesPanel, BorderLayout.SOUTH);
+        piesContainer.add(piesPanel, BorderLayout.CENTER);
+        add(piesContainer, BorderLayout.SOUTH);
     }
 
-    // Отрисовка тёмного фона с закруглением
     @Override
     protected void paintComponent(Graphics g) {
         Graphics2D g2 = (Graphics2D) g.create();
@@ -52,12 +62,11 @@ public class SummaryPanel extends JPanel {
         super.paintComponent(g);
     }
 
-    // ============ Левая часть: общий прогресс ============
     private JPanel createTitleBox() {
         JPanel box = new JPanel();
         box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
         box.setOpaque(false);
-        box.setPreferredSize(new Dimension(200, 120));
+        box.setPreferredSize(new Dimension(200, 140));
 
         JLabel title = new JLabel("Общий прогресс");
         title.setFont(new Font("Segoe UI", Font.BOLD, 16));
@@ -90,7 +99,37 @@ public class SummaryPanel extends JPanel {
         return String.format("%.2f", done * 100.0 / all).replace('.', ',') + "%";
     }
 
-    // ============ Центральная часть: сетка ячеек ============
+    private JPanel createRightColumn() {
+        JPanel col = new JPanel();
+        col.setLayout(new BoxLayout(col, BoxLayout.Y_AXIS));
+        col.setOpaque(false);
+        col.setPreferredSize(new Dimension(230, 140));
+        col.setBorder(new EmptyBorder(0, 16, 0, 0));
+
+        forecastValue = new JLabel();
+        col.add(metricRow("Прогноз финиша", forecastValue, Theme.TEXT_PRIMARY));
+
+        return col;
+    }
+
+    private JPanel metricRow(String label, JLabel valueLabel, Color valueColor) {
+        JPanel row = new JPanel(new BorderLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+
+        JLabel l = new JLabel(label);
+        l.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        l.setForeground(Theme.TEXT_SECONDARY);
+
+        valueLabel.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        valueLabel.setForeground(valueColor);
+
+        row.add(l, BorderLayout.WEST);
+        row.add(valueLabel, BorderLayout.EAST);
+        return row;
+    }
+
     private JPanel createSummaryGrid() {
         int cols = (int) Math.ceil(SUMMARY_CELLS / (double) SUMMARY_ROWS);
         JPanel grid = new JPanel(new GridLayout(SUMMARY_ROWS, cols, 3, 3));
@@ -139,18 +178,27 @@ public class SummaryPanel extends JPanel {
         return cell;
     }
 
-    // ============ Нижняя часть: диаграммы ============
     private JPanel createPiesPanel() {
-        List<Course> courses = repo.getAll();
-        JPanel panel = new JPanel(new GridLayout(1, Math.max(1, courses.size()), 14, 0));
+        List<Course> courses = repo.getActive();
+        int total = Math.max(1, courses.size());
+        int cols = Math.min(total, 8);
+        int rows = (int) Math.ceil(total / (double) cols);
+
+        JPanel panel = new JPanel(new GridLayout(rows, cols, 14, 14));
         panel.setOpaque(false);
-        panel.setPreferredSize(new Dimension(0, 140));
+        panel.setPreferredSize(new Dimension(0, 140 * rows));
         panel.setBorder(new EmptyBorder(14, 0, 4, 0));
 
-        for (int i = 0; i < courses.size(); i++) {
+        for (int i = 0; i < total; i++) {
             Course c = courses.get(i);
             Color color = Theme.PIE_COLORS[i % Theme.PIE_COLORS.length];
             panel.add(createPieCard(c, color));
+        }
+
+        for (int i = total; i < rows * cols; i++) {
+            JPanel empty = new JPanel();
+            empty.setOpaque(false);
+            panel.add(empty);
         }
         return panel;
     }
@@ -160,7 +208,7 @@ public class SummaryPanel extends JPanel {
             @Override protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g.create();
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setColor(new Color(28, 33, 40));
+                g2.setColor(Theme.BG_CARD_HOVER);
                 g2.fill(new RoundRectangle2D.Double(0, 0, getWidth(), getHeight(), 12, 12));
                 g2.dispose();
             }
@@ -179,7 +227,18 @@ public class SummaryPanel extends JPanel {
         return card;
     }
 
-    // ============ Живое обновление без пересоздания ============
+    public void rebuildPies() {
+        if (piesContainer == null) return;
+        if (piesPanel != null) piesContainer.remove(piesPanel);
+
+        piesPanel = createPiesPanel();
+        piesContainer.add(piesPanel, BorderLayout.CENTER);
+        piesContainer.revalidate();
+        piesContainer.repaint();
+        revalidate();
+        repaint();
+    }
+
     public void refresh() {
         int totalDone = repo.getTotalDone();
         int totalAll = repo.getTotalAll();
@@ -199,18 +258,24 @@ public class SummaryPanel extends JPanel {
             }
         }
 
-        // Обновляем доли в диаграммах
-        List<Course> courses = repo.getAll();
-        Component[] pieCards = piesPanel.getComponents();
-        for (int i = 0; i < Math.min(courses.size(), pieCards.length); i++) {
-            if (pieCards[i] instanceof JPanel) {
-                JPanel card = (JPanel) pieCards[i];
-                for (Component inner : card.getComponents()) {
-                    if (inner instanceof PieChart) {
-                        ((PieChart) inner).setPercent(courses.get(i).getPercent());
+        List<Course> courses = repo.getActive();
+        if (piesPanel != null) {
+            Component[] pieCards = piesPanel.getComponents();
+            for (int i = 0; i < Math.min(courses.size(), pieCards.length); i++) {
+                if (pieCards[i] instanceof JPanel) {
+                    JPanel card = (JPanel) pieCards[i];
+                    for (Component inner : card.getComponents()) {
+                        if (inner instanceof PieChart) {
+                            ((PieChart) inner).setPercent(courses.get(i).getPercent());
+                        }
                     }
                 }
             }
         }
+
+        DailyStats stats = repo.getStats();
+        int left = repo.getTotalLeft();
+        LocalDate forecast = stats.predictFinishDate(left);
+        forecastValue.setText(forecast == null ? "—" : forecast.format(FMT));
     }
 }
